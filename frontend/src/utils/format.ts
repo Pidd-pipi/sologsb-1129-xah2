@@ -84,6 +84,12 @@ export function suggestSampleNo(dateStr: string, seq: number): string {
   return `YZ-${compact}-${`${seq}`.padStart(2, '0')}`;
 }
 
+/** 生成借展批次编号建议，例：JZ-20260925-01 */
+export function suggestLoanCode(dateStr: string, seq: number): string {
+  const compact = (dateStr || todayStr()).replace(/-/g, '');
+  return `JZ-${compact}-${`${seq}`.padStart(2, '0')}`;
+}
+
 /** 简单文本截断 */
 export function truncate(text: string, len: number): string {
   if (!text) return '';

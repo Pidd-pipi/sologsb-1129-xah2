@@ -1,13 +1,16 @@
 import { useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useCaseStore } from '../stores/caseStore';
+import { useLoanStore } from '../stores/loanStore';
 import { useMatrixStore } from '../stores/matrixStore';
 import { useUiStore } from '../stores/uiStore';
+import { useActiveLoans } from '../hooks/useActiveLoans';
 
 const NAV = [
   { to: '/', label: '字模总览', testId: 'nav-overview', end: true },
   { to: '/matrices/new', label: '字模登记', testId: 'nav-matrix-new', end: false },
   { to: '/cases', label: '字盘布局', testId: 'nav-cases', end: false },
+  { to: '/loans', label: '借展管理', testId: 'nav-loans', end: false },
   { to: '/defects', label: '缺损登记', testId: 'nav-defects', end: false },
   { to: '/proofs', label: '试印记录', testId: 'nav-proofs', end: false },
 ];
@@ -22,6 +25,7 @@ export default function AppShell() {
   const location = useLocation();
   const loadMatrices = useMatrixStore((s) => s.load);
   const loadCases = useCaseStore((s) => s.load);
+  const loadLoans = useLoanStore((s) => s.load);
   const matrixCount = useMatrixStore((s) => s.matrices.length);
   const disabledCount = useMatrixStore(
     (s) => s.matrices.filter((m) => m.availability === '停用').length,
@@ -30,13 +34,15 @@ export default function AppShell() {
     (s) => s.matrices.filter((m) => m.availability === '待补刻').length,
   );
   const caseCount = useCaseStore((s) => s.cases.length);
+  const { onLoanCount, overdueCount } = useActiveLoans();
   const toast = useUiStore((s) => s.toast);
   const clearToast = useUiStore((s) => s.clearToast);
 
   useEffect(() => {
     void loadMatrices();
     void loadCases();
-  }, [loadMatrices, loadCases]);
+    void loadLoans();
+  }, [loadMatrices, loadCases, loadLoans]);
 
   useEffect(() => {
     if (!toast) return;
@@ -93,6 +99,14 @@ export default function AppShell() {
             <span className="mt-chip border-brass/40 text-brass" data-testid="count-repair">
               待补刻 {repairCount}
             </span>
+            <span className="mt-chip border-brass/40 text-brass" data-testid="count-on-loan">
+              借出 {onLoanCount}
+            </span>
+            {overdueCount > 0 ? (
+              <span className="mt-chip border-seal/40 text-seal" data-testid="count-overdue">
+                逾期 {overdueCount}
+              </span>
+            ) : null}
           </div>
         </div>
       </header>

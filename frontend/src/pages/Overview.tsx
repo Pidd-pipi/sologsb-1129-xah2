@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import DefectBadge from '../components/common/DefectBadge';
 import EmptyState from '../components/common/EmptyState';
 import MatrixCell from '../components/common/MatrixCell';
+import { useActiveLoans } from '../hooks/useActiveLoans';
 import { useMatrixSearch } from '../hooks/useMatrixSearch';
 import { useMatrixStore } from '../stores/matrixStore';
 import { useUiStore } from '../stores/uiStore';
@@ -11,8 +12,9 @@ import {
   MATRIX_MATERIALS,
   MATRIX_SIZE_NAMES,
 } from '../types/matrix';
+import { loanOverdueDays } from '../types/loan';
 import { pinyinOf, radicalOf, strokesOf } from '../utils/charIndex';
-import { dash, formatStamp, percent } from '../utils/format';
+import { dash, formatDate, formatStamp, percent } from '../utils/format';
 
 const SORT_OPTIONS = [
   { value: 'strokes', label: '按部首笔画排序' },
@@ -32,6 +34,7 @@ export default function Overview() {
   const setFilter = useUiStore((s) => s.setFilter);
   const resetFilter = useUiStore((s) => s.resetFilter);
   const { results, countByAvailability, latestDefect } = useMatrixSearch();
+  const { loanOf, onLoanCount, overdueCount } = useActiveLoans();
 
   const total = matrices.length;
   const available = matrices.filter((m) => m.availability === '可用').length;
@@ -62,6 +65,17 @@ export default function Overview() {
           <span className="mt-chip border-brass/40 text-brass" data-testid="stat-repair">
             待补刻 {repair}
           </span>
+          <span className="mt-chip border-brass/40 text-brass" data-testid="stat-on-loan">
+            借出 {onLoanCount}
+          </span>
+          {overdueCount > 0 ? (
+            <span className="mt-chip border-seal/40 text-seal" data-testid="stat-overdue">
+              逾期 {overdueCount}
+            </span>
+          ) : null}
+          <Link className="mt-btn" to="/loans" data-testid="stat-goto-loans">
+            借展手续
+          </Link>
         </div>
       </section>
 
@@ -195,6 +209,9 @@ export default function Overview() {
             </span>
           ))}
           <span>· 角标为最新缺损记录</span>
+          <span data-testid="overview-loan-summary">
+            · 借展中 {onLoanCount} 枚（逾期 {overdueCount} 枚）
+          </span>
         </div>
       </section>
 
@@ -228,6 +245,7 @@ export default function Overview() {
       >
         {results.map((m) => {
           const defect = latestDefect(m.id);
+          const loan = loanOf(m.id);
           return (
             <div key={m.id} className="space-y-1">
               <Link to={`/matrices/${m.id}`} data-testid={`matrix-link-${m.id}`} className="block">
@@ -240,6 +258,7 @@ export default function Overview() {
                   material={m.material}
                   availability={m.availability}
                   defect={defect}
+                  loan={loan ? { overdue: loan.overdue, overdueDays: loanOverdueDays(loan.dueDate) } : null}
                   testId={`matrix-card-${m.id}`}
                 />
               </Link>
@@ -259,6 +278,18 @@ export default function Overview() {
                   <span className="text-[10px] text-ink-mute">{defect.foundDate}</span>
                 </div>
               ) : null}
+              {loan ? (
+                <Link
+                  to="/loans"
+                  className={`block rounded px-1 py-0.5 text-[10px] leading-tight ${
+                    loan.overdue ? 'text-seal' : 'text-brass'
+                  }`}
+                  data-testid={`overview-loan-${m.id}`}
+                >
+                  {loan.overdue ? `逾期未还 ${loanOverdueDays(loan.dueDate)} 天 · ` : '借展中 · '}
+                  应还 {formatDate(loan.dueDate)}
+                </Link>
+              ) : null}
             </div>
           );
         })}
@@ -277,6 +308,11 @@ export default function Overview() {
           <p>
             最近更新：
             {matrices[0] ? `${dash(matrices[0].code)} · ${formatStamp(matrices[0].updatedAt)}` : '—'}
+          </p>
+          <p data-testid="overview-summary-loan">
+            借展中 {onLoanCount} 枚
+            {overdueCount > 0 ? `，其中 ${overdueCount} 枚已逾期，请及时催还` : '，暂无逾期'}
+            ；借还手续在「借展管理」中办理。
           </p>
         </div>
       </section>

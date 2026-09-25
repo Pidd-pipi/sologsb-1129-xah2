@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { db, ensureSeed } from '../db';
 import type { CaseInput, CaseSlot, TypeCase } from '../types/case';
 import { capacityOf } from '../types/case';
+import { buildActiveLoanMap } from '../types/loan';
 import { makeId, toPlain } from '../utils/format';
 import { matrixIdsOf, validateCapacity } from '../utils/layout';
 
@@ -77,6 +78,14 @@ export const useCaseStore = create<CaseState>((set, get) => ({
     if (!current) throw new Error('未找到字盘');
     const check = validateCapacity(current.rows, current.cols, slots);
     if (check.overCapacity) throw new Error(check.message);
+    // 借出中的字模实物离馆，不允许排进字盘（防御草稿 / 过期状态落库）
+    const activeLoans = buildActiveLoanMap(await db.loans.toArray());
+    const blocked = slots
+      .map((s) => s.matrixId)
+      .filter((mid, i, arr) => arr.indexOf(mid) === i && activeLoans.has(mid));
+    if (blocked.length > 0) {
+      throw new Error('借展中的字模不能排进字盘，请先取出后再保存');
+    }
     const plainSlots = toPlain(slots);
     const next: Partial<TypeCase> = {
       slots: plainSlots,

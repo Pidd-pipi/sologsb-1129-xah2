@@ -1,6 +1,6 @@
 # 活字字模与铅字档案（gbmovabletype）
 
-面向活字印刷体验馆、铅字工坊与字体研究者的字模 / 字盘 / 试印档案工具：登记字模的字体、字号与材质，在行列网格上编辑字盘落位，记录缺笔磨损等损耗并据此停用或补刻。**纯前端单页应用**，数据全部保存在浏览器本地，不依赖任何后端服务、数据库或外部接口。
+面向活字印刷体验馆、铅字工坊与字体研究者的字模 / 字盘 / 试印 / 借展档案工具：登记字模的字体、字号与材质，在行列网格上编辑字盘落位，记录缺笔磨损等损耗并据此停用或补刻；支持批次借展登记与按枚归库清点，借出期间字模不会再被借出或排进字盘，逾期自动标明。**纯前端单页应用**，数据全部保存在浏览器本地，不依赖任何后端服务、数据库或外部接口。
 
 ## Docker 一键启动（推荐）
 
@@ -31,7 +31,7 @@ docker compose down        # 停止并移除容器（数据在浏览器本地，
 | 本地存储 | IndexedDB（Dexie，库名 `gbmovabletype-db`）+ localStorage（表单 / 布局草稿） |
 | 部署 | 多阶段 Docker：`node:20-alpine` 构建 → `nginx:alpine` 托管静态产物 |
 
-## 数据模型（`src/types/` 四个独立文件）
+## 数据模型（`src/types/` 五个独立文件）
 
 | 模型 | 文件 | 关键字段 |
 | --- | --- | --- |
@@ -39,23 +39,33 @@ docker compose down        # 停止并移除容器（数据在浏览器本地，
 | TypeCase 字盘 | `src/types/case.ts` | 字盘编号、类型（常用字盘/生僻字盘）、行数、列数、格位布局（行/列/字符/字模 id）、所在工位、容量 |
 | DefectLog 缺损记录 | `src/types/defect.ts` | 字模 id、缺损类型（缺笔/磨损/变形/锈蚀/断裂）、程度（轻/中/重）、发现日期、处理方式、可用性（可用/停用/待补刻） |
 | ProofRecord 试印记录 | `src/types/proof.ts` | 字符或字盘、压力 kg、用墨、印次、样张编号、清晰度评价（清晰/偏淡/糊版）、试印日期 |
+| LoanBatch 借展批次 | `src/types/loan.ts` | 批次编号、借用人/单位、用途、借出日期、应还日期、经手人、按枚清单（归库结论 完好/损坏、归还日期、清点备注）、批次状态 |
+
+### 借展手续说明
+
+- **批次借出**：一次可勾选多枚「在库且可用」的字模（停用、待补刻、已借出的不能勾选），登记借用人、用途、借出日期、应还日期与经手人；提交在事务内二次校验，杜绝重复借出。
+- **借出期间**：借出字模自动从全部字盘格位取出，字盘落位候选中不再出现，保存布局时也会拒绝借出中字模；逾期（超过应还日期仍有未归还条目）在总览卡片、顶栏统计与字模详情横幅直接标红。
+- **按枚归库清点**：每枚选「完好」或「损坏」。完好的恢复「可用」；损坏的转「待补刻」并自动生成一条缺损记录（引用借展批次与借用人）。支持逐枚清点、分批归还，批次状态随清点进度自动变化。
+- **可追溯**：每枚字模的详情页都有「借展履历」，列出历次借出 / 应还 / 归库结论与清点备注；借展状态以 `loans` 表中的未归还条目为唯一事实源，不写入字模可用性枚举。
 
 ### IndexedDB 版本与升级迁移（Dexie）
 
 - **v1**：建 `matrices` 表（含 code / character / font / sizeName / material / availability 索引）
 - **v2**：加 `cases` 表与 `matrixId` 多值索引；升级时按 `slots` 回填历史字盘的 `matrixId`
 - **v3**：加 `defects`、`proofs` 表；升级时为「停用 / 待补刻」的历史字模回填缺损原因记录
+- **v4**：加 `loans` 表（批次编号 / 状态 / 借用人 / 借出日期 / 应还日期索引与 `matrixId` 多值索引）；旧档案无需回填，借出状态完全由 loans 记录派生
 
-首次打开且库为空时会写入一批示例档案（16 枚字模、2 个字盘、5 条缺损、6 条试印），便于直接体验；已有数据则跳过。
+首次打开且库为空时会写入一批示例档案（16 枚字模、2 个字盘、6 条缺损、6 条试印、3 个借展批次：借出中逾期 / 完好归还 / 损坏归还各一），便于直接体验；已有数据则跳过。
 
 ## 页面与路由
 
 | 路由 | 页面 | 说明 |
 | --- | --- | --- |
-| `/` | `Overview` | 字模总览：按字体 / 字号 / 材质 / 可用性筛选，卡片显示字符大样与缺损角标，可按部首笔画排序 |
+| `/` | `Overview` | 字模总览：按字体 / 字号 / 材质 / 可用性筛选，卡片显示字符大样、缺损角标与借展 / 逾期标识，可按部首笔画排序 |
 | `/matrices/new` | `MatrixNew` | 字模登记：字符选择器按部首与笔画校验并给出候选，填写字体、字号、材质、尺寸与年代 |
-| `/matrices/:id` | `MatrixDetail` | 字模详情：字面信息、所在字盘格位、缺损历史、试印记录，可就地新增缺损或试印、补刻恢复可用 |
-| `/cases` | `CaseEditor` | 字盘布局编辑器：行列网格点击落位 / 取出 / 调换，实时提示空格与重复落位 |
+| `/matrices/:id` | `MatrixDetail` | 字模详情：字面信息、所在字盘格位、缺损历史、试印记录、借展履历（借出横幅含逾期提示），可就地新增缺损或试印、补刻恢复可用 |
+| `/cases` | `CaseEditor` | 字盘布局编辑器：行列网格点击落位 / 取出 / 调换，实时提示空格与重复落位；借展中字模不进入候选 |
+| `/loans` | `LoanBoard` | 批次借展与归库：勾选多枚在库字模登记借出，按批次查看明细，归库时逐枚清点完好 / 损坏 |
 | `/defects` | `DefectBoard` | 缺损登记：提交后自动停用字模并进入待补刻清单，补刻完成一键恢复 |
 | `/proofs` | `ProofList` | 试印记录：登记压力、用墨与清晰度，按样张编号回溯试印批次 |
 
@@ -74,21 +84,21 @@ docker compose down        # 停止并移除容器（数据在浏览器本地，
     ├── tailwind.config.js / postcss.config.js / vite.config.ts
     ├── public/favicon.svg
     └── src/
-        ├── types/{matrix,case,defect,proof}.ts
+        ├── types/{matrix,case,defect,proof,loan}.ts
         ├── db/index.ts       # Dexie 库、版本迁移、示例档案
-        ├── stores/{matrixStore,caseStore,uiStore}.ts
-        ├── hooks/{useMatrixSearch,useLocalDraft,useCaseSlots}.ts
-        ├── components/common/{MatrixCell,LayoutGrid,CharacterPicker,DefectBadge,EmptyState}.tsx
+        ├── stores/{matrixStore,caseStore,loanStore,uiStore}.ts
+        ├── hooks/{useMatrixSearch,useLocalDraft,useCaseSlots,useActiveLoans}.ts
+        ├── components/common/{MatrixCell,LayoutGrid,CharacterPicker,DefectBadge,LoanBadge,EmptyState}.tsx
         ├── layouts/AppShell.tsx
-        ├── pages/{Overview,MatrixNew,MatrixDetail,CaseEditor,DefectBoard,ProofList}.tsx
+        ├── pages/{Overview,MatrixNew,MatrixDetail,CaseEditor,LoanBoard,DefectBoard,ProofList}.tsx
         ├── router/index.tsx
         └── utils/{charIndex,layout,format}.ts
 ```
 
 ## 数据存储说明
 
-- **业务数据**：IndexedDB（Dexie，库名 `gbmovabletype-db`，共 4 张表 `matrices` / `cases` / `defects` / `proofs`）。写入前统一 `toPlain()` 深拷贝，避免响应式对象写库抛 `DataCloneError`。
-- **草稿数据**：localStorage，前缀 `gbmovabletype-draft:`，覆盖字模登记、字盘布局、缺损登记、试印登记四处表单，刷新后可恢复。
+- **业务数据**：IndexedDB（Dexie，库名 `gbmovabletype-db`，共 5 张表 `matrices` / `cases` / `defects` / `proofs` / `loans`）。写入前统一 `toPlain()` 深拷贝，避免响应式对象写库抛 `DataCloneError`。
+- **草稿数据**：localStorage，前缀 `gbmovabletype-draft:`，覆盖字模登记、字盘布局、缺损登记、试印登记、借展登记五处表单，刷新后可恢复。
 - **界面偏好**：localStorage，键 `gbmovabletype-ui`（Zustand persist，保存筛选条件与当前选中字盘）。
 - 容器完全无状态：不挂载命名卷、不连接数据库服务，删除重建容器不影响浏览器里的档案。
 

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import CharacterPicker from '../components/common/CharacterPicker';
 import EmptyState from '../components/common/EmptyState';
 import LayoutGrid from '../components/common/LayoutGrid';
+import { useActiveLoans } from '../hooks/useActiveLoans';
 import { DRAFT_KEYS, useLocalDraft } from '../hooks/useLocalDraft';
 import { useCaseSlots } from '../hooks/useCaseSlots';
 import { useMatrixSearch } from '../hooks/useMatrixSearch';
@@ -233,7 +234,13 @@ interface PendingPlacement {
 function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
   const pushToast = useUiStore((s) => s.pushToast);
   const api = useCaseSlots(typeCase);
-  const { results: candidateMatrices } = useMatrixSearch({ availability: ['可用'], ignoreKeyword: true });
+  const { results: searchResults } = useMatrixSearch({ availability: ['可用'], ignoreKeyword: true });
+  const { isOnLoan } = useActiveLoans();
+  // 借出中的字模实物离馆，不可排进字盘
+  const candidateMatrices = useMemo(
+    () => searchResults.filter((m) => !isOnLoan(m.id)),
+    [searchResults, isOnLoan],
+  );
   const [pickedChar, setPickedChar] = useState('');
   const [pending, setPending] = useState<PendingPlacement | null>(null);
   const [selectedKey, setSelectedKey] = useState('');
@@ -399,11 +406,11 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
               />
               <div className="mt-2 space-y-1">
                 <p className="text-[11px] text-ink-mute">
-                  可用字模候选 {charCandidates.length} 枚（按总览页筛选条件）
+                  可用字模候选 {charCandidates.length} 枚（按总览页筛选条件，借展中的已排除）
                 </p>
                 {pickedChar && charCandidates.length === 0 ? (
                   <p className="text-[11px] text-seal" data-testid="no-candidate">
-                    「{pickedChar}」当前没有可用字模，请先到「字模登记」登记或补刻。
+                    「{pickedChar}」当前没有可排字的在库字模，请先到「字模登记」登记、补刻恢复，或等借展归还。
                   </p>
                 ) : null}
                 <div className="flex flex-wrap gap-1">
@@ -521,6 +528,9 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
 
             <Link className="mt-btn block text-center" to="/defects" data-testid="goto-defects">
               去登记缺损 / 补刻
+            </Link>
+            <Link className="mt-btn block text-center" to="/loans" data-testid="goto-loans">
+              去借展管理（借出 / 归库）
             </Link>
           </div>
         </div>

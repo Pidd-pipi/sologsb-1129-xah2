@@ -3,7 +3,10 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import DefectBadge from '../components/common/DefectBadge';
 import EmptyState from '../components/common/EmptyState';
 import LayoutGrid from '../components/common/LayoutGrid';
+import LoanBadge from '../components/common/LoanBadge';
 import MatrixCell from '../components/common/MatrixCell';
+import { useActiveLoans } from '../hooks/useActiveLoans';
+import { useLoanStore } from '../stores/loanStore';
 import { useMatrixStore } from '../stores/matrixStore';
 import { findCaseHolding, useCaseStore } from '../stores/caseStore';
 import { useUiStore } from '../stores/uiStore';
@@ -16,6 +19,7 @@ import {
   TYPE_SIZES,
   type MatrixAvailability,
 } from '../types/matrix';
+import { loanHistoryOf, loanOverdueDays } from '../types/loan';
 import { CLARITY_LEVELS, IMPRESSION_RANGE, PRESSURE_RANGE } from '../types/proof';
 import type { ClarityLevel } from '../types/proof';
 import { pinyinOf, radicalOf, strokesOf } from '../utils/charIndex';
@@ -48,10 +52,14 @@ export default function MatrixDetail() {
   const addProof = useMatrixStore((s) => s.addProof);
   const repairMatrix = useMatrixStore((s) => s.repairMatrix);
   const removeMatrix = useMatrixStore((s) => s.removeMatrix);
+  const loans = useLoanStore((s) => s.loans);
   const cases = useCaseStore((s) => s.cases);
+  const { loanOf } = useActiveLoans();
   const pushToast = useUiStore((s) => s.pushToast);
 
   const matrix = matrices.find((m) => m.id === id);
+  const activeLoan = id ? loanOf(id) : undefined;
+  const matrixLoans = useMemo(() => (id ? loanHistoryOf(loans, id) : []), [loans, id]);
   const matrixDefects = useMemo(
     () => defects.filter((d) => d.matrixId === id).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)),
     [defects, id],
@@ -257,6 +265,37 @@ export default function MatrixDetail() {
         </div>
       </section>
 
+      {activeLoan ? (
+        <section
+          className={`flex flex-wrap items-center justify-between gap-3 rounded-md border px-4 py-3 ${
+            activeLoan.overdue ? 'border-seal/50 bg-seal-pale' : 'border-brass/50 bg-brass-pale'
+          }`}
+          data-testid="detail-loan-banner"
+        >
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <LoanBadge
+                overdue={activeLoan.overdue}
+                overdueDays={loanOverdueDays(activeLoan.dueDate)}
+                testId="detail-loan-badge"
+              />
+              <span className="text-sm text-ink">
+                借用于 {dash(activeLoan.borrower)}
+                {activeLoan.overdue ? ` · 已逾期 ${loanOverdueDays(activeLoan.dueDate)} 天` : ''}
+              </span>
+            </div>
+            <p className="text-xs text-ink-soft">
+              用途：{dash(activeLoan.purpose)} · 借出 {formatDate(activeLoan.lendDate)} · 应还{' '}
+              {formatDate(activeLoan.dueDate)} · 经手 {dash(activeLoan.operator)}
+            </p>
+            <p className="text-[11px] text-ink-mute">借出期间不可再次借出或排进字盘，归库清点在「借展管理」中办理。</p>
+          </div>
+          <Link className="mt-btn" to="/loans" data-testid="detail-loan-goto">
+            办理归库
+          </Link>
+        </section>
+      ) : null}
+
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
         <div className="mt-panel px-4 py-4">
           <MatrixCell
@@ -268,11 +307,13 @@ export default function MatrixDetail() {
             material={matrix.material}
             availability={matrix.availability}
             defect={matrixDefects[0] ?? null}
+            loan={activeLoan ? { overdue: activeLoan.overdue, overdueDays: loanOverdueDays(activeLoan.dueDate) } : null}
             testId="detail-cell"
           />
           <div className="mt-3 space-y-1 text-xs text-ink-soft">
             <p>缺损记录 {matrixDefects.length} 条</p>
             <p>试印记录 {matrixProofs.length} 条</p>
+            <p data-testid="detail-loan-count">借展记录 {matrixLoans.length} 次</p>
             <p>所在字盘 {holdings.length} 处</p>
           </div>
           {editing ? (
@@ -298,6 +339,7 @@ export default function MatrixDetail() {
                   data-testid="edit-availability"
                   className="mt-input"
                   value={editForm.availability}
+                  disabled={Boolean(activeLoan)}
                   onChange={(e) =>
                     setEditForm((p) => ({ ...p, availability: e.target.value as MatrixAvailability }))
                   }
@@ -308,6 +350,9 @@ export default function MatrixDetail() {
                     </option>
                   ))}
                 </select>
+                {activeLoan ? (
+                  <p className="mt-hint">借展期间不可修改可用性，归库清点后再调整。</p>
+                ) : null}
               </div>
               <div>
                 <label className="mt-label" htmlFor="edit-note">
@@ -642,6 +687,53 @@ export default function MatrixDetail() {
             </button>
           </form>
         </div>
+      </section>
+
+      <section className="mt-panel">
+        <div className="mt-panel-head">
+          <h3 className="font-song text-sm font-semibold text-ink">借展履历</h3>
+          <span className="mt-sub">每次借出与归库清点均可在此查到</span>
+        </div>
+        {matrixLoans.length === 0 ? (
+          <p className="px-4 py-4 text-xs text-ink-mute" data-testid="loan-history-empty">
+            该字模暂无借展记录。
+          </p>
+        ) : (
+          <ul className="divide-y divide-paper-line" data-testid="loan-history">
+            {matrixLoans.map(({ batch, item }) => {
+              const batchOverdue = item.status === '借出中' && batch.dueDate < todayStr();
+              return (
+                <li key={batch.id} className="space-y-1 px-4 py-3" data-testid={`loan-history-item-${batch.id}`}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link className="font-song text-sm text-ink hover:text-seal" to="/loans">
+                      {batch.code}
+                    </Link>
+                    {item.status === '借出中' ? (
+                      <LoanBadge overdue={batchOverdue} overdueDays={loanOverdueDays(batch.dueDate)} compact />
+                    ) : (
+                      <span
+                        className={`mt-chip ${
+                          item.condition === '损坏' ? 'border-seal/40 text-seal' : 'border-jade/40 text-jade'
+                        }`}
+                      >
+                        {item.condition === '损坏' ? '归库损坏 · 待补刻' : '归库完好 · 已恢复可用'}
+                      </span>
+                    )}
+                    <span className="text-xs text-ink-mute">
+                      {formatDate(batch.lendDate)}
+                      {item.returnDate ? ` → ${formatDate(item.returnDate)}` : ` → 应还 ${formatDate(batch.dueDate)}`}
+                    </span>
+                  </div>
+                  <p className="text-xs text-ink-soft">
+                    借用于 {dash(batch.borrower)} · 用途 {dash(batch.purpose)} · 经手 {dash(batch.operator)}
+                  </p>
+                  {item.note ? <p className="text-[11px] text-ink-mute">清点备注：{item.note}</p> : null}
+                  {batch.note ? <p className="text-[11px] text-ink-mute">批次备注：{batch.note}</p> : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
 
       <p className="text-[11px] text-ink-mute">

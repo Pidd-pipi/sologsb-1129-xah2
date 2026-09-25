@@ -85,4 +85,5 @@ export const DRAFT_KEYS = {
   caseEditor: (caseId: string) => `case-${caseId}`,
   defectBoard: 'defect-new',
   proofNew: 'proof-new',
+  loanBoard: 'loan-new',
 } as const;

@@ -3,6 +3,7 @@ import type { MatrixAvailability } from '../../types/matrix';
 import { radicalOf, strokesOf } from '../../utils/charIndex';
 import { dash } from '../../utils/format';
 import DefectBadge from './DefectBadge';
+import LoanBadge from './LoanBadge';
 
 export interface MatrixCellProps {
   character: string;
@@ -14,6 +15,8 @@ export interface MatrixCellProps {
   availability?: MatrixAvailability;
   /** 该字模最新一条缺损记录，用于缺损角标 */
   defect?: DefectLog | null;
+  /** 借展角标：借出中 / 逾期未还 */
+  loan?: { overdue: boolean; overdueDays?: number } | null;
   selected?: boolean;
   compact?: boolean;
   onClick?: () => void;
@@ -42,6 +45,7 @@ export default function MatrixCell({
   material,
   availability,
   defect,
+  loan = null,
   selected = false,
   compact = false,
   onClick,
@@ -103,6 +107,11 @@ export default function MatrixCell({
             compact
             testId={`${testId}-defect`}
           />
+        </span>
+      ) : null}
+      {loan ? (
+        <span className="absolute -bottom-1 -left-1">
+          <LoanBadge overdue={loan.overdue} overdueDays={loan.overdueDays} compact testId={`${testId}-loan`} />
         </span>
       ) : null}
     </div>

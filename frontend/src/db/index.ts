@@ -2,11 +2,12 @@ import Dexie, { type Table } from 'dexie';
 import type { CaseSlot, TypeCase } from '../types/case';
 import type { DefectLog } from '../types/defect';
 import type { DefectSeverity, DefectType } from '../types/defect';
+import type { LoanBatch } from '../types/loan';
 import type { MatrixAvailability, MatrixFont, MatrixMaterial, TypeMatrix } from '../types/matrix';
 import { ptOfSize } from '../types/matrix';
 import type { ProofRecord } from '../types/proof';
 import { matrixIdsOf } from '../utils/layout';
-import { suggestCaseCode, suggestMatrixCode, toPlain } from '../utils/format';
+import { addDays, suggestCaseCode, suggestLoanCode, suggestMatrixCode, todayStr, toPlain } from '../utils/format';
 
 export const DB_NAME = 'gbmovabletype-db';
 
@@ -15,12 +16,14 @@ export const DB_NAME = 'gbmovabletype-db';
  * v1 建 matrices
  * v2 加 cases 表与 matrixId 索引
  * v3 加 defects / proofs 表，并为停用字模回填缺损原因
+ * v4 加 loans 表（借展批次），含 matrixId 多值索引
  */
 class MovableTypeDb extends Dexie {
   matrices!: Table<TypeMatrix, string>;
   cases!: Table<TypeCase, string>;
   defects!: Table<DefectLog, string>;
   proofs!: Table<ProofRecord, string>;
+  loans!: Table<LoanBatch, string>;
 
   constructor() {
     super(DB_NAME);
@@ -78,6 +81,13 @@ class MovableTypeDb extends Dexie {
           });
         }
       });
+    this.version(4).stores({
+      matrices: 'id, code, character, font, sizeName, material, availability',
+      cases: 'id, code, kind, workStation, *matrixId',
+      defects: 'id, matrixId, defectType, severity, availability, foundDate',
+      proofs: 'id, matrixId, sampleNo, clarity, proofDate',
+      loans: 'id, code, borrower, loanDate, dueDate, *matrixId',
+    });
   }
 }
 
@@ -233,7 +243,39 @@ function buildSeed() {
     };
   });
   const proofs: ProofRecord[] = SEED_PROOFS.map((p) => ({ ...p, createdAt: now }));
-  return { matrices, cases, defects, proofs };
+  // 示例借展批次：两枚字模仍在展期中（其中一枚已逾期），用于演示在借 / 逾期标注与归库清点
+  const today = todayStr();
+  const seedLoanMatrices = ['m-1001', 'm-1002']
+    .map((id) => matrices.find((m) => m.id === id))
+    .filter((m): m is TypeMatrix => Boolean(m));
+  const loans: LoanBatch[] = [
+    {
+      id: 'loan-4001',
+      code: suggestLoanCode(today, []),
+      borrower: '城南印刷博物馆',
+      purpose: '「铅火与纸」活字印刷特展',
+      loanDate: addDays(today, -45),
+      dueDate: addDays(today, -10),
+      operator: '陈之安',
+      note: '示例批次：「活」字铜模已逾期，可在借展管理页办理归库清点',
+      items: seedLoanMatrices.map((m, i) => ({
+        matrixId: m.id,
+        character: m.character,
+        matrixCode: m.code,
+        loanDate: addDays(today, -45),
+        dueDate: i === 0 ? addDays(today, -10) : addDays(today, 20),
+        returnedDate: '',
+        condition: '' as const,
+        defectId: '',
+        note: '',
+        returnedAt: '',
+      })),
+      matrixId: seedLoanMatrices.map((m) => m.id),
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
+  return { matrices, cases, defects, proofs, loans };
 }
 
 let seedPromise: Promise<void> | null = null;
@@ -242,11 +284,12 @@ async function doSeed(): Promise<void> {
   const count = await db.matrices.count();
   if (count > 0) return;
   const seed = toPlain(buildSeed());
-  await db.transaction('rw', db.matrices, db.cases, db.defects, db.proofs, async () => {
+  await db.transaction('rw', db.matrices, db.cases, db.defects, db.proofs, db.loans, async () => {
     await db.matrices.bulkPut(seed.matrices);
     await db.cases.bulkPut(seed.cases);
     await db.defects.bulkPut(seed.defects);
     await db.proofs.bulkPut(seed.proofs);
+    await db.loans.bulkPut(seed.loans);
   });
 }
 

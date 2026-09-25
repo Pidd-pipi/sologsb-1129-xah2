@@ -1,10 +1,13 @@
 import { Link } from 'react-router-dom';
 import DefectBadge from '../components/common/DefectBadge';
 import EmptyState from '../components/common/EmptyState';
+import LoanBadge from '../components/common/LoanBadge';
 import MatrixCell from '../components/common/MatrixCell';
 import { useMatrixSearch } from '../hooks/useMatrixSearch';
 import { useMatrixStore } from '../stores/matrixStore';
 import { useUiStore } from '../stores/uiStore';
+import { summarizeLoans } from '../types/loan';
+import { useLoanStore } from '../stores/loanStore';
 import {
   MATRIX_AVAILABILITIES,
   MATRIX_FONTS,
@@ -22,21 +25,30 @@ const SORT_OPTIONS = [
   { value: 'code', label: '按字模编号排序' },
 ] as const;
 
-/** `/` 字模总览：筛选 + 排序 + 卡片大样 + 缺损角标 */
+const LOAN_FILTER_OPTIONS = [
+  { value: '', label: '全部借展状态' },
+  { value: '在库', label: '在库（未借出）' },
+  { value: '借出中', label: '借出中' },
+  { value: '已逾期', label: '已逾期' },
+] as const;
+
+/** `/` 字模总览：筛选 + 排序 + 卡片大样 + 缺损 / 借展角标 */
 export default function Overview() {
   const matrices = useMatrixStore((s) => s.matrices);
   const defects = useMatrixStore((s) => s.defects);
   const loading = useMatrixStore((s) => s.loading);
   const error = useMatrixStore((s) => s.error);
+  const loans = useLoanStore((s) => s.loans);
   const filter = useUiStore((s) => s.filter);
   const setFilter = useUiStore((s) => s.setFilter);
   const resetFilter = useUiStore((s) => s.resetFilter);
-  const { results, countByAvailability, latestDefect } = useMatrixSearch();
+  const { results, countByAvailability, latestDefect, activeLoan } = useMatrixSearch();
 
   const total = matrices.length;
   const available = matrices.filter((m) => m.availability === '可用').length;
   const disabled = matrices.filter((m) => m.availability === '停用').length;
   const repair = matrices.filter((m) => m.availability === '待补刻').length;
+  const loanStats = summarizeLoans(loans);
 
   return (
     <div className="space-y-4">
@@ -55,6 +67,12 @@ export default function Overview() {
           </span>
           <span className="mt-chip border-jade/40 text-jade" data-testid="stat-available">
             可用 {available}
+          </span>
+          <span className="mt-chip border-brass/40 text-brass" data-testid="stat-on-loan">
+            在借 {loanStats.active}
+          </span>
+          <span className="mt-chip border-seal/40 text-seal" data-testid="stat-overdue">
+            逾期 {loanStats.overdue}
           </span>
           <span className="mt-chip border-seal/40 text-seal" data-testid="stat-disabled">
             停用 {disabled}
@@ -77,7 +95,7 @@ export default function Overview() {
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-3 px-4 py-3 sm:grid-cols-2 lg:grid-cols-6">
+        <div className="grid grid-cols-1 gap-3 px-4 py-3 sm:grid-cols-2 lg:grid-cols-7">
           <div>
             <label className="mt-label" htmlFor="filter-font">
               字体
@@ -157,6 +175,24 @@ export default function Overview() {
             </select>
           </div>
           <div>
+            <label className="mt-label" htmlFor="filter-loan">
+              借展状态
+            </label>
+            <select
+              id="filter-loan"
+              data-testid="filter-loan"
+              className="mt-input"
+              value={filter.loan ?? ''}
+              onChange={(e) => setFilter({ loan: e.target.value as typeof filter.loan })}
+            >
+              {LOAN_FILTER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="mt-label" htmlFor="filter-keyword">
               字符 / 拼音 / 编号
             </label>
@@ -195,6 +231,7 @@ export default function Overview() {
             </span>
           ))}
           <span>· 角标为最新缺损记录</span>
+          <span>· 借出中 {loanStats.active} 枚，逾期 {loanStats.overdue} 枚</span>
         </div>
       </section>
 
@@ -228,6 +265,7 @@ export default function Overview() {
       >
         {results.map((m) => {
           const defect = latestDefect(m.id);
+          const loan = activeLoan(m.id);
           return (
             <div key={m.id} className="space-y-1">
               <Link to={`/matrices/${m.id}`} data-testid={`matrix-link-${m.id}`} className="block">
@@ -249,6 +287,11 @@ export default function Overview() {
                 </span>
                 <span>{pinyinOf(m.character) || '未收录'}</span>
               </div>
+              {loan ? (
+                <div className="px-0.5">
+                  <LoanBadge loan={loan} compact testId={`overview-loan-${m.id}`} />
+                </div>
+              ) : null}
               {defect ? (
                 <div className="flex items-center justify-between gap-1 px-0.5">
                   <DefectBadge
@@ -267,13 +310,16 @@ export default function Overview() {
       <section className="mt-panel" data-testid="overview-summary">
         <div className="mt-panel-head">
           <h3 className="font-song text-sm font-semibold text-ink">档案摘要</h3>
-          <span className="mt-sub">缺损记录 {defects.length} 条</span>
+          <span className="mt-sub">缺损记录 {defects.length} 条 · 借展批次 {loanStats.batches} 个</span>
         </div>
         <div className="grid grid-cols-1 gap-3 px-4 py-3 text-xs text-ink-soft md:grid-cols-3">
           <p>
             可用率：{percent(available, total)}%（可用 {available} / 合计 {total}）
           </p>
-          <p>停用字模：{disabled} 枚，需补刻或重铸后方可回到排字工位</p>
+          <p>
+            借展在途：{loanStats.active} 枚
+            {loanStats.overdue > 0 ? `，其中逾期 ${loanStats.overdue} 枚请尽快催还` : '，暂无逾期'}
+          </p>
           <p>
             最近更新：
             {matrices[0] ? `${dash(matrices[0].code)} · ${formatStamp(matrices[0].updatedAt)}` : '—'}

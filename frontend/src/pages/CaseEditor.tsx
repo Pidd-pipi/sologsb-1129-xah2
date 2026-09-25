@@ -233,7 +233,11 @@ interface PendingPlacement {
 function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
   const pushToast = useUiStore((s) => s.pushToast);
   const api = useCaseSlots(typeCase);
-  const { results: candidateMatrices } = useMatrixSearch({ availability: ['可用'], ignoreKeyword: true });
+  const { results: candidateMatrices, activeLoan } = useMatrixSearch({
+    availability: ['可用'],
+    ignoreKeyword: true,
+    excludeOnLoan: true,
+  });
   const [pickedChar, setPickedChar] = useState('');
   const [pending, setPending] = useState<PendingPlacement | null>(null);
   const [selectedKey, setSelectedKey] = useState('');
@@ -270,6 +274,17 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
       ...api.conflicts.duplicateCharacters.flatMap((g) => g.keys),
     ],
     [api.conflicts],
+  );
+
+  /** 已落位但当前正在借展的字模（历史落位保留，仅提示；新落位会被拦截） */
+  const onLoanSlots = useMemo(
+    () =>
+      api.slots
+        .map((s) => ({ slot: s, loan: activeLoan(s.matrixId) }))
+        .filter((x): x is { slot: CaseSlot; loan: NonNullable<ReturnType<typeof activeLoan>> } =>
+          Boolean(x.loan),
+        ),
+    [api.slots, activeLoan],
   );
 
   const handleSlotClick = (row: number, col: number) => {
@@ -382,6 +397,17 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
                 </p>
               ) : null}
             </div>
+            {onLoanSlots.length > 0 ? (
+              <div
+                className="rounded border border-brass/40 bg-brass-pale px-3 py-2 text-xs text-brass"
+                data-testid="on-loan-slots-warning"
+              >
+                {onLoanSlots
+                  .map(({ slot, loan }) => `「${slot.character}」（批次 ${loan.batch.code}，应还 ${loan.item.dueDate}）`)
+                  .join('、')}
+                正在借展期间：历史落位记录保留，但不能再把它们排进其它格位，归库后方可继续排字。
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-3">
@@ -399,11 +425,11 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
               />
               <div className="mt-2 space-y-1">
                 <p className="text-[11px] text-ink-mute">
-                  可用字模候选 {charCandidates.length} 枚（按总览页筛选条件）
+                  可用字模候选 {charCandidates.length} 枚（不含停用 / 待补刻 / 借展中的字模）
                 </p>
                 {pickedChar && charCandidates.length === 0 ? (
                   <p className="text-[11px] text-seal" data-testid="no-candidate">
-                    「{pickedChar}」当前没有可用字模，请先到「字模登记」登记或补刻。
+                    「{pickedChar}」当前没有可落位的字模（可能已借出、停用或待补刻），请先办理归库或补刻。
                   </p>
                 ) : null}
                 <div className="flex flex-wrap gap-1">

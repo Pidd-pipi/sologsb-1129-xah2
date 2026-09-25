@@ -1,8 +1,11 @@
 import { useMemo } from 'react';
+import { useLoanStore } from '../stores/loanStore';
 import { useMatrixStore } from '../stores/matrixStore';
 import { useUiStore, type MatrixFilter } from '../stores/uiStore';
 import type { DefectLog } from '../types/defect';
 import { SEVERITY_WEIGHT } from '../types/defect';
+import type { ActiveLoan } from '../types/loan';
+import { activeLoanMap } from '../types/loan';
 import type { MatrixAvailability, TypeMatrix } from '../types/matrix';
 import { charSortValue, pinyinOf, radicalOf, radicalStrokeValue, strokesOf } from '../utils/charIndex';
 
@@ -13,6 +16,8 @@ export interface MatrixSearchResult {
   countByAvailability: Record<string, number>;
   /** 最新一条缺损记录，按字模 id 索引 */
   latestDefect: (matrixId: string) => DefectLog | undefined;
+  /** 当前生效的外借记录，按字模 id 索引 */
+  activeLoan: (matrixId: string) => ActiveLoan | undefined;
   /** 当前生效的筛选条件 */
   filter: MatrixFilter;
 }
@@ -22,6 +27,8 @@ export interface MatrixSearchOptions {
   availability?: MatrixAvailability[];
   /** 忽略关键字条件（字盘页按已选字符定位时使用） */
   ignoreKeyword?: boolean;
+  /** 排除外借中的字模（字盘落位候选时使用） */
+  excludeOnLoan?: boolean;
 }
 
 /** 关键字命中：字符 / 拼音 / 拼音首字母 / 字模编号 / 刻工 */
@@ -44,16 +51,24 @@ export function searchMatrices(
   matrices: TypeMatrix[],
   filter: MatrixFilter,
   options: MatrixSearchOptions = {},
+  loanMap?: Map<string, ActiveLoan>,
 ): TypeMatrix[] {
-  const scoped = options.availability
+  let scoped = options.availability
     ? matrices.filter((m) => options.availability!.includes(m.availability))
     : matrices;
+  if (options.excludeOnLoan && loanMap) scoped = scoped.filter((m) => !loanMap.has(m.id));
   const keyword = options.ignoreKeyword ? '' : filter.keyword;
   const filtered = scoped.filter((m) => {
     if (filter.font && m.font !== filter.font) return false;
     if (filter.sizeName && m.sizeName !== filter.sizeName) return false;
     if (filter.material && m.material !== filter.material) return false;
     if (filter.availability && m.availability !== filter.availability) return false;
+    if (filter.loan && loanMap) {
+      const held = loanMap.get(m.id);
+      if (filter.loan === '在库' && held) return false;
+      if (filter.loan === '借出中' && (!held || held.overdue)) return false;
+      if (filter.loan === '已逾期' && (!held || !held.overdue)) return false;
+    }
     return matchKeyword(m, keyword);
   });
   const sorted = [...filtered];
@@ -96,6 +111,7 @@ export function searchMatrices(
 export function useMatrixSearch(options: MatrixSearchOptions = {}): MatrixSearchResult {
   const matrices = useMatrixStore((s) => s.matrices);
   const defects = useMatrixStore((s) => s.defects);
+  const loans = useLoanStore((s) => s.loans);
   const filter = useUiStore((s) => s.filter);
 
   const latestDefectMap = useMemo(() => {
@@ -111,10 +127,12 @@ export function useMatrixSearch(options: MatrixSearchOptions = {}): MatrixSearch
     return map;
   }, [defects]);
 
+  const loanMap = useMemo(() => activeLoanMap(loans), [loans]);
+
   const results = useMemo(
-    () => searchMatrices(matrices, filter, options),
+    () => searchMatrices(matrices, filter, options, loanMap),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [matrices, filter, options.availability?.join(','), options.ignoreKeyword],
+    [matrices, filter, loanMap, options.availability?.join(','), options.ignoreKeyword, options.excludeOnLoan],
   );
 
   const countByAvailability = useMemo(() => {
@@ -128,6 +146,7 @@ export function useMatrixSearch(options: MatrixSearchOptions = {}): MatrixSearch
     total: results.length,
     countByAvailability,
     latestDefect: (matrixId: string) => latestDefectMap.get(matrixId),
+    activeLoan: (matrixId: string) => loanMap.get(matrixId),
     filter,
   };
 }

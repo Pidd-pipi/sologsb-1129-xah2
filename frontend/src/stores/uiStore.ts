@@ -3,12 +3,17 @@ import { persist } from 'zustand/middleware';
 import type { MatrixAvailability, MatrixFont, MatrixMaterial } from '../types/matrix';
 import type { CharSortMode } from '../utils/charIndex';
 
+/** 总览页借展状态筛选：在库 / 借出中 / 已逾期 */
+export type LoanFilter = '' | '在库' | '借出中' | '已逾期';
+
 /** 总览页筛选与排序条件 */
 export interface MatrixFilter {
   font: MatrixFont | '';
   sizeName: string;
   material: MatrixMaterial | '';
   availability: MatrixAvailability | '';
+  /** 借展状态：空串表示全部 */
+  loan: LoanFilter;
   /** 字符 / 拼音 / 拼音首字母 / 字模编号 */
   keyword: string;
   /** 字符 / 笔画 / 部首 / 拼音 / 编号 */
@@ -20,6 +25,7 @@ export const EMPTY_FILTER: MatrixFilter = {
   sizeName: '',
   material: '',
   availability: '',
+  loan: '',
   keyword: '',
   sortBy: 'strokes',
 };

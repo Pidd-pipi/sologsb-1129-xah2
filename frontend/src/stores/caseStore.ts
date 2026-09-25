@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { db, ensureSeed } from '../db';
 import type { CaseInput, CaseSlot, TypeCase } from '../types/case';
 import { capacityOf } from '../types/case';
+import { activeLoanMap } from '../types/loan';
 import { makeId, toPlain } from '../utils/format';
 import { matrixIdsOf, validateCapacity } from '../utils/layout';
 
@@ -71,12 +72,24 @@ export const useCaseStore = create<CaseState>((set, get) => ({
     set((s) => ({ cases: s.cases.map((c) => (c.id === id ? { ...c, ...next } : c)) }));
   },
 
-  /** 保存格位布局：同时刷新 matrixId 多值索引，便于按字模反查字盘 */
+  /** 保存格位布局：同时刷新 matrixId 多值索引，便于按字模反查字盘；在借字模不得新落位 */
   saveSlots: async (id, slots) => {
     const current = get().cases.find((c) => c.id === id);
     if (!current) throw new Error('未找到字盘');
     const check = validateCapacity(current.rows, current.cols, slots);
     if (check.overCapacity) throw new Error(check.message);
+    const before = new Set(matrixIdsOf(current.slots));
+    const newlyPlaced = slots.filter((s) => s.matrixId && !before.has(s.matrixId));
+    if (newlyPlaced.length > 0) {
+      const onLoan = activeLoanMap((await db.loans.toArray()) ?? []);
+      const blocked = newlyPlaced.filter((s) => onLoan.has(s.matrixId));
+      if (blocked.length > 0) {
+        const names = blocked
+          .map((s) => `「${s.character}」（应还 ${onLoan.get(s.matrixId)!.item.dueDate}）`)
+          .join('、');
+        throw new Error(`${names} 正在借展期间，不能排进字盘，请先办理归库`);
+      }
+    }
     const plainSlots = toPlain(slots);
     const next: Partial<TypeCase> = {
       slots: plainSlots,

@@ -3,12 +3,15 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import DefectBadge from '../components/common/DefectBadge';
 import EmptyState from '../components/common/EmptyState';
 import LayoutGrid from '../components/common/LayoutGrid';
+import LoanBadge from '../components/common/LoanBadge';
 import MatrixCell from '../components/common/MatrixCell';
 import { useMatrixStore } from '../stores/matrixStore';
 import { findCaseHolding, useCaseStore } from '../stores/caseStore';
+import { useLoanStore } from '../stores/loanStore';
 import { useUiStore } from '../stores/uiStore';
 import { DEFECT_SEVERITIES, DEFECT_TYPES, validateDefectInput } from '../types/defect';
 import type { DefectSeverity, DefectType } from '../types/defect';
+import { findActiveLoan, isItemOnLoan, isItemOverdue } from '../types/loan';
 import {
   MATRIX_AVAILABILITIES,
   MATRIX_FONTS,
@@ -49,6 +52,7 @@ export default function MatrixDetail() {
   const repairMatrix = useMatrixStore((s) => s.repairMatrix);
   const removeMatrix = useMatrixStore((s) => s.removeMatrix);
   const cases = useCaseStore((s) => s.cases);
+  const loans = useLoanStore((s) => s.loans);
   const pushToast = useUiStore((s) => s.pushToast);
 
   const matrix = matrices.find((m) => m.id === id);
@@ -61,6 +65,16 @@ export default function MatrixDetail() {
     [proofs, id],
   );
   const holdings = useMemo(() => findCaseHolding(cases, id), [cases, id]);
+  /** 该字模参与过的全部借展批次（含每枚的借出 / 归库明细），按登记时间倒序 */
+  const matrixLoans = useMemo(
+    () =>
+      loans
+        .filter((batch) => batch.items.some((it) => it.matrixId === id))
+        .map((batch) => ({ batch, item: batch.items.find((it) => it.matrixId === id)! }))
+        .sort((a, b) => (a.batch.createdAt < b.batch.createdAt ? 1 : -1)),
+    [loans, id],
+  );
+  const activeLoan = useMemo(() => findActiveLoan(loans, id), [loans, id]);
 
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -205,6 +219,10 @@ export default function MatrixDetail() {
   };
 
   const handleRemove = async () => {
+    if (activeLoan) {
+      pushToast(`「${matrix.character}」正在借展批次 ${activeLoan.batch.code} 中，归库前不能删除档案`, 'warn');
+      return;
+    }
     await removeMatrix(matrix.id);
     pushToast(`已删除字模「${matrix.character}」的档案`, 'warn');
     navigate('/');
@@ -226,6 +244,9 @@ export default function MatrixDetail() {
           <span className="mt-chip" data-testid="detail-availability">
             当前状态：{matrix.availability}
           </span>
+          {activeLoan ? (
+            <LoanBadge loan={activeLoan} testId="detail-loan-badge" />
+          ) : null}
           {matrix.availability !== '可用' ? (
             <button type="button" className="mt-btn mt-btn-primary" data-testid="repair-btn" onClick={handleRepair}>
               补刻完成，恢复可用
@@ -273,6 +294,7 @@ export default function MatrixDetail() {
           <div className="mt-3 space-y-1 text-xs text-ink-soft">
             <p>缺损记录 {matrixDefects.length} 条</p>
             <p>试印记录 {matrixProofs.length} 条</p>
+            <p>借展记录 {matrixLoans.length} 条</p>
             <p>所在字盘 {holdings.length} 处</p>
           </div>
           {editing ? (
@@ -352,6 +374,11 @@ export default function MatrixDetail() {
 
           <div className="border-t border-paper-line px-4 py-3">
             <h4 className="mb-2 font-song text-sm font-semibold text-ink">所在字盘格位</h4>
+            {activeLoan ? (
+              <p className="mb-2 rounded border border-brass/40 bg-brass-pale px-3 py-2 text-xs text-brass" data-testid="detail-loan-holding-hint">
+                该字模正在借展期间（{activeLoan.batch.code} · {activeLoan.batch.borrower}），不能排进新的字盘格位；以下为借出前留存的历史落位记录。
+              </p>
+            ) : null}
             {holdings.length === 0 ? (
               <p className="text-xs text-ink-mute" data-testid="no-holding">
                 该字模当前未落在任何字盘格位上，可到「字盘布局」页面落位。
@@ -380,6 +407,64 @@ export default function MatrixDetail() {
             )}
           </div>
         </div>
+      </section>
+
+      <section className="mt-panel" data-testid="loan-history-panel">
+        <div className="mt-panel-head">
+          <h3 className="font-song text-sm font-semibold text-ink">借展与归库记录</h3>
+          <div className="flex items-center gap-2">
+            <span className="mt-sub">每次借出与归库清点都留痕可查</span>
+            <Link className="mt-btn" to="/loans" data-testid="goto-loans">
+              去借展管理
+            </Link>
+          </div>
+        </div>
+        <ul className="divide-y divide-paper-line" data-testid="loan-history">
+          {matrixLoans.length === 0 ? (
+            <li className="px-4 py-4 text-xs text-ink-mute" data-testid="loan-history-empty">
+              暂无借展记录，该字模从未外借。
+            </li>
+          ) : (
+            matrixLoans.map(({ batch, item }) => {
+              const onLoan = isItemOnLoan(item);
+              const overdue = isItemOverdue(item, todayStr());
+              return (
+                <li key={`${batch.id}-${item.matrixId}`} className="space-y-1 px-4 py-3" data-testid={`loan-history-${batch.id}`}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-song text-sm text-ink">{batch.code}</span>
+                    {onLoan ? (
+                      <LoanBadge
+                        loan={{ batch, item, overdue }}
+                        compact
+                        testId={`loan-history-badge-${batch.id}`}
+                      />
+                    ) : (
+                      <span
+                        className={`mt-chip ${
+                          item.condition === '损坏' ? 'border-seal/40 text-seal' : 'border-jade/40 text-jade'
+                        }`}
+                      >
+                        {formatDate(item.returnedDate)} 归库 · {item.condition}
+                      </span>
+                    )}
+                    <span className="text-xs text-ink-mute">借用人 {dash(batch.borrower)}</span>
+                    <span className="text-xs text-ink-mute">经手 {dash(batch.operator)}</span>
+                  </div>
+                  <p className="text-xs leading-relaxed text-ink-soft">
+                    {batch.purpose} · 借出 {formatDate(item.loanDate)} · 应还 {formatDate(item.dueDate)}
+                    {onLoan ? '' : ` · 实还 ${formatDate(item.returnedDate)}`}
+                  </p>
+                  {!onLoan && item.condition === '损坏' ? (
+                    <p className="text-[11px] text-seal">
+                      归库清点发现损坏，已转待补刻并登记缺损记录（见上方缺损历史）。
+                    </p>
+                  ) : null}
+                  {item.note ? <p className="text-[11px] text-ink-mute">清点备注：{item.note}</p> : null}
+                </li>
+              );
+            })
+          )}
+        </ul>
       </section>
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">

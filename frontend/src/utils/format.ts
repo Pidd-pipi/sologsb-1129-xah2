@@ -84,6 +84,18 @@ export function suggestSampleNo(dateStr: string, seq: number): string {
   return `YZ-${compact}-${`${seq}`.padStart(2, '0')}`;
 }
 
+/** 生成借展批次编号，例：JZ-20260925-01（当日已占用时自动顺延） */
+export function suggestLoanCode(dateStr: string, existing: string[]): string {
+  const compact = (dateStr || todayStr()).replace(/-/g, '');
+  let seq = 1;
+  let code = `JZ-${compact}-${`${seq}`.padStart(2, '0')}`;
+  while (existing.includes(code)) {
+    seq += 1;
+    code = `JZ-${compact}-${`${seq}`.padStart(2, '0')}`;
+  }
+  return code;
+}
+
 /** 简单文本截断 */
 export function truncate(text: string, len: number): string {
   if (!text) return '';
